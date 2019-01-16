@@ -1,8 +1,8 @@
 # Eclipse
 .metadata
 .recommenders
-.classpath
-.project
+# .classpath
+# .project
 .settings
 .factorypath
 .checkstyle
