@@ -38,7 +38,7 @@ public class Component extends IdentifiableComponent {
 
         private final String name;
         private final Set<PackagePattern> contained;
-        private final Map<String, ReadKind> reads;
+        private final Map<String, ReadCounter> reads;
 
         public Builder(String name) {
             this.name = name;
@@ -48,7 +48,14 @@ public class Component extends IdentifiableComponent {
 
         public Builder addRead(String read, ReadKind readKind) {
             if (!read.isEmpty() && !read.equals(name) && !read.equals("java.lang")) {
-                reads.put(read, readKind);
+                ReadCounter readCounter = reads.get(read);
+                if (readCounter == null) {
+                    readCounter = new ReadCounter(readKind);
+                    reads.put(read, readCounter);
+                }
+                else {
+                    readCounter.increment(readKind);
+                }
             }
 
             return this;
@@ -68,7 +75,7 @@ public class Component extends IdentifiableComponent {
             return new Component(name, contained, reads);
         }
 
-        public Map<String, ReadKind> getReads() {
+        public Map<String, ReadCounter> getReads() {
             return reads;
         }
 
@@ -77,10 +84,37 @@ public class Component extends IdentifiableComponent {
         }
     }
 
-    private final Set<PackagePattern> contained;
-    private final Map<String, ReadKind> reads;
+    public static class ReadCounter {
 
-    public Component(String name, Set<PackagePattern> contained, Map<String, ReadKind> reads) {
+        private int count;
+        private ReadKind readKind;
+
+        public ReadCounter(ReadKind readKind) {
+            this.readKind = readKind;
+            this.count = 1;
+        }
+
+        public void increment(ReadKind readKind) {
+            this.readKind = readKind;
+
+            if (readKind != ReadKind.CYCLE) {
+                count++;
+            }
+        }
+
+        public int getCount() {
+            return count;
+        }
+
+        public ReadKind getReadKind() {
+            return readKind;
+        }
+    }
+
+    private final Set<PackagePattern> contained;
+    private final Map<String, ReadCounter> reads;
+
+    public Component(String name, Set<PackagePattern> contained, Map<String, ReadCounter> reads) {
         super(name);
         this.contained = Collections.unmodifiableSet(new HashSet<>(contained));
         this.reads = Collections.unmodifiableMap(new HashMap<>(reads));
@@ -101,14 +135,20 @@ public class Component extends IdentifiableComponent {
     }
 
     public boolean allowedToRead(Component other) {
-        return name.equals(other.name) || reads.get(other.getName()) == ReadKind.ALLOWED;
+        if (name.equals(other.name)) {
+            return true;
+        }
+
+        ReadCounter readCounter = reads.get(other.getName());
+
+        return readCounter != null && readCounter.readKind == ReadKind.ALLOWED;
     }
 
     public Set<PackagePattern> getContained() {
         return contained;
     }
 
-    public Map<String, ReadKind> getReads() {
+    public Map<String, ReadCounter> getReads() {
         return reads;
     }
 

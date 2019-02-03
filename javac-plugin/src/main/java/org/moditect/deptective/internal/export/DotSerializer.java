@@ -22,6 +22,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 import org.moditect.deptective.internal.model.Component;
+import org.moditect.deptective.internal.model.Component.ReadCounter;
 import org.moditect.deptective.internal.model.PackagePattern;
 import org.moditect.deptective.internal.model.ReadKind;
 
@@ -34,10 +35,10 @@ public class DotSerializer implements ModelSerializer {
 
     private final StringBuilder sb;
     private final SortedSet<String> allPackages;
-    private final SortedMap<String, SortedSet<String>> allowedReads;
-    private final SortedMap<String, SortedSet<String>> disallowedReads;
-    private final SortedMap<String, SortedSet<String>> cycleReads;
-    private final SortedMap<String, SortedSet<String>> unknownReads;
+    private final SortedMap<String, SortedSet<ComponentReference>> allowedReads;
+    private final SortedMap<String, SortedSet<ComponentReference>> disallowedReads;
+    private final SortedMap<String, SortedSet<ComponentReference>> cycleReads;
+    private final SortedMap<String, SortedSet<ComponentReference>> unknownReads;
 
     public DotSerializer() {
         sb = new StringBuilder();
@@ -51,37 +52,56 @@ public class DotSerializer implements ModelSerializer {
         unknownReads = new TreeMap<>();
     }
 
+    private static class ComponentReference implements Comparable<ComponentReference> {
+
+        private final String referencedPackageName;
+        private final int count;
+
+        public ComponentReference(String referencedPackageName, int count) {
+            this.referencedPackageName = referencedPackageName;
+            this.count = count;
+        }
+
+        @Override
+        public int compareTo(ComponentReference o) {
+            return referencedPackageName.compareTo(o.referencedPackageName);
+        }
+    }
+
     @Override
     public void addComponent(Component component) {
         allPackages.add(component.getName());
 
-        SortedSet<String> allowed = new TreeSet<>();
+        SortedSet<ComponentReference> allowed = new TreeSet<>();
         allowedReads.put(component.getName(), allowed);
 
-        SortedSet<String> disallowed = new TreeSet<>();
+        SortedSet<ComponentReference> disallowed = new TreeSet<>();
         disallowedReads.put(component.getName(), disallowed);
 
-        SortedSet<String> cycle = new TreeSet<>();
+        SortedSet<ComponentReference> cycle = new TreeSet<>();
         cycleReads.put(component.getName(), cycle);
 
-        SortedSet<String> unknown = new TreeSet<>();
+        SortedSet<ComponentReference> unknown = new TreeSet<>();
         unknownReads.put(component.getName(), unknown);
 
-        for (Entry<String, ReadKind> referencedPackage : component.getReads().entrySet()) {
+        for (Entry<String, ReadCounter> referencedPackage : component.getReads().entrySet()) {
             String referencedPackageName = referencedPackage.getKey();
+            ComponentReference reference = new ComponentReference(
+                    referencedPackageName, referencedPackage.getValue().getCount()
+            );
             allPackages.add(referencedPackageName);
 
-            if (referencedPackage.getValue() == ReadKind.ALLOWED) {
-                allowed.add(referencedPackageName);
+            if (referencedPackage.getValue().getReadKind() == ReadKind.ALLOWED) {
+                allowed.add(reference);
             }
-            else if (referencedPackage.getValue() == ReadKind.DISALLOWED) {
-                disallowed.add(referencedPackageName);
+            else if (referencedPackage.getValue().getReadKind() == ReadKind.DISALLOWED) {
+                disallowed.add(reference);
             }
-            else if (referencedPackage.getValue() == ReadKind.CYCLE) {
-                cycle.add(referencedPackageName);
+            else if (referencedPackage.getValue().getReadKind() == ReadKind.CYCLE) {
+                cycle.add(reference);
             }
             else {
-                unknown.add(referencedPackageName);
+                unknown.add(reference);
             }
         }
     }
@@ -96,18 +116,20 @@ public class DotSerializer implements ModelSerializer {
             sb.append("  \"").append(pakkage).append("\";").append(System.lineSeparator());
         }
 
-        addSubGraph(sb, allowedReads, "Allowed", null);
-        addSubGraph(sb, disallowedReads, "Disallowed", "red");
-        addSubGraph(sb, cycleReads, "Cycle", "purple");
-        addSubGraph(sb, unknownReads, "Unknown", "yellow");
+        addSubGraph(sb, allowedReads, "Allowed", null, false);
+        addSubGraph(sb, disallowedReads, "Disallowed", "red", true);
+        addSubGraph(sb, cycleReads, "Cycle", "purple", true);
+        addSubGraph(sb, unknownReads, "Unknown", "yellow", true);
 
         sb.append("}");
 
         return sb.toString();
     }
 
-    private void addSubGraph(StringBuilder sb, SortedMap<String, SortedSet<String>> readsOfKind, String kind,
-            String color) {
+    private void addSubGraph(StringBuilder sb, SortedMap<String, SortedSet<ComponentReference>> readsOfKind,
+            String kind,
+            String color,
+            boolean showCount) {
 
         StringBuilder subGraphBuilder = new StringBuilder();
         boolean atLeastOneEdge = false;
@@ -116,9 +138,14 @@ public class DotSerializer implements ModelSerializer {
         if (color != null) {
             subGraphBuilder.append("    edge [color=" + color + ", penwidth=2]").append(System.lineSeparator());
         }
-        for (Entry<String, SortedSet<String>> reads : readsOfKind.entrySet()) {
-            for (String read : reads.getValue()) {
-                subGraphBuilder.append("    \"").append(reads.getKey()).append("\" -> \"").append(read).append("\";\n");
+        for (Entry<String, SortedSet<ComponentReference>> reads : readsOfKind.entrySet()) {
+            for (ComponentReference read : reads.getValue()) {
+                subGraphBuilder.append("    \"").append(reads.getKey()).append("\" -> \"")
+                        .append(read.referencedPackageName).append("\"");
+                if (showCount) {
+                    subGraphBuilder.append(" [ label=\" " + read.count + "\" ]");
+                }
+                subGraphBuilder.append(";\n");
                 atLeastOneEdge = true;
             }
         }
